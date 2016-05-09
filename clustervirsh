@@ -64,46 +64,35 @@ class ClusterVirt():
             print strErr
             return
 
-
-        strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started'" % (strVMname,strXMLfile)
-        lstPCScmd = re.split(" ",strPCScmd)
-        #dirty hack for "op xxx"
+        ######list style is not working .. multiple op xxx ignored by Popen->os.excvp->os.execvpe
+        # strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started'" % (strVMname,strXMLfile)
+        # lstPCScmd = re.split(" ",strPCScmd)
         # lstPCScmd.append("op start")
-        # lstPCScmd.append("interval='0'")
-        # lstPCScmd.append("timeout='120s'")
-        # lstPCScmd.append("on-fail='restart'")
-
+        # lstPCScmd.append("interval='0' timeout='120s' on-fail='restart'")
         # lstPCScmd.append("op monitor")
-        # lstPCScmd.append("interval='10s'")
-        # lstPCScmd.append("timeout='30s'")
-        # lstPCScmd.append("on-fail='restart'")
-
+        # lstPCScmd.append("interval='10s' timeout='30s' on-fail='restart'")
         # lstPCScmd.append("op stop")
         # lstPCScmd.append("interval='0'")
         # lstPCScmd.append("timeout='90s'")
         # lstPCScmd.append("on-fail='fence'")
-
         # lstPCScmd.append("op migrate_to")
         # lstPCScmd.append("interval='0'")
         # lstPCScmd.append("timeout='300s'")
         # lstPCScmd.append("on-fail='fence'")
-
         # lstPCScmd.append("op migrate_from")
         # lstPCScmd.append("interval='0'")
         # lstPCScmd.append("timeout='240s'")
         # lstPCScmd.append("on-fail='restart'")
 
+        strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started' op start interval='0' timeout='120s' on-fail='restart' op monitor interval='10s' timeout='30s' on-fail='restart' op stop interval='0' timeout='90s' on-fail='fence' op migrate_to interval='0' timeout='300s' on-fail='fence' op migrate_from interval='0' timeout='240s'on-fail='restart'" % (strVMname,strXMLfile)
 
-        import pprint
-        pprint.pprint(lstPCScmd)
-        # return 
 
-        p2 = sp.Popen(lstPCScmd,stdout=sp.PIPE, stderr=sp.PIPE)
+        p2 = sp.Popen(strPCScmd,shell=True)
         strOut,strErr = p2.communicate()
         if(strErr):
             print "pcs resource add error(%s)" % strErr
             return
-        print "add finished"
+        sp.Popen(["pcs","resource"])
 
     def DelVM(self,argv,argc):
         strVMname = argv[2]
