@@ -19,9 +19,13 @@ class ClusterVirt():
         self.dicFunc = {
             "list":self.ShowGuests,
             "addvm":self.AddVM2PCS,
+            "a":self.AddVM2PCS,
             "delvm":self.DelVM,
+            "d":self.DelVM,
             "migrate":self.migrate,
+            "m":self.migrate,
             "console":self.console,
+            "cons":self.console,
             "clone":self.clone
             
         }
