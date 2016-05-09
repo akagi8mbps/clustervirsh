@@ -100,7 +100,7 @@ class ClusterVirt():
 
     def DelVM(self,argv,argc):
         strVMname = argv[2]
-        strPCScmd = 'pcs resource delete %s' % strVMname
+        strPCScmd = 'pcs resource delete vm-%s' % strVMname
         p2 = sp.Popen(re.split(" ",strPCScmd))
         strOut,strErr = p2.communicate()
         if(strErr):
