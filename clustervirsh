@@ -22,6 +22,7 @@ class ClusterVirt():
             "a":self.AddVM2PCS,
             "delvm":self.DelVM,
             "d":self.DelVM,
+            "delimage":self.DelImage,
             "migrate":self.migrate,
             "m":self.migrate,
             "console":self.console,
@@ -107,6 +108,54 @@ class ClusterVirt():
             print "pcs resource add error(%s)" % strErr
             return
         print strOut
+
+    def DelImage(eslf,argv,argc):
+        strImg = argv[2]
+        #rbd info sl71-insideharmdev2 | grep parent
+        strCmd = "rbd info %s" % (strImg)
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd info error(%s)" % strErr
+            return
+        if(strOut): print strOut;
+
+        strParentSnap = None
+        for l in strOut.split("\n"):
+            #        parent: rbd/sl71-insideharmdev@sl71-insideharmdev-snap-20160510112814
+            reRet = re.match("^[ \t]+parent: (.*$)",l)
+            if(reRet):
+                strParentSnap = reRet.group(1)
+                print strParentSnap
+                break
+
+        strCmd = "rbd rm %s" % (strImg)
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd rm error(%s)" % strErr
+            return
+        print "rbd image removed(%s)" % strImg 
+        if(strOut): print strOut;
+
+        if(strParentSnap): # snap available
+            print "This rbd image was created from %s" %strParentSnap
+            strCmd = "rbd snap unprotect %s" % (strParentSnap)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "rbd snap create error(%s)" % strErr
+                return
+            print "snap unprotected (%s)" %strParentSnap
+            if(strOut): print strOut;
+            strCmd = "rbd snap rm %s" % (strParentSnap)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "rbd snap create error(%s)" % strErr
+                return
+            print "Snap removed (%s)" %strParentSnap
+            if(strOut): print strOut;
 
     def GetVMHost(self,strVMname):
         for hv in self.lstHV:
