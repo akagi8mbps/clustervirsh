@@ -97,6 +97,16 @@ class ClusterVirt():
         if(strErr):
             print "pcs resource add error(%s)" % strErr
             return
+
+        print "Added %s to Cluster" % strVMname
+        strPCScmd = "pcs constraint order set gfs2_res01-clone pinggw-clone vm-%s action=start role=Started" % strVMname
+        p2 = sp.Popen(strPCScmd,shell=True)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs resource add error(%s)" % strErr
+            return
+        print "Added order for %s" % strVMname
+
         sp.Popen(["pcs","resource"])
 
     def DelVM(self,argv,argc):
@@ -218,7 +228,9 @@ class ClusterVirt():
         ele.find(".//source").set("name","rbd/"+strNewName)
         
         for i in  ele.findall(".//interface"):
-            i.remove(i.find(".//mac"))
+            eleMac = i.find(".//mac")
+            if(eleMac):
+                i.remove(eleMac)
             # import pprint
             # pprint.pprint(dir(ele))
 
