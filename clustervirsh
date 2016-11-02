@@ -89,7 +89,7 @@ class ClusterVirt():
         # lstPCScmd.append("timeout='240s'")
         # lstPCScmd.append("on-fail='restart'")
 
-        strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started' op start interval='0' timeout='120s' on-fail='restart' op monitor interval='10s' timeout='30s' on-fail='restart' op stop interval='0' timeout='90s' on-fail='fence' op migrate_to interval='0' timeout='300s' on-fail='fence' op migrate_from interval='0' timeout='240s'on-fail='restart'" % (strVMname,strXMLfile)
+        strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started' op start interval='0' timeout='120s' on-fail='restart' op monitor interval='10s' timeout='30s' on-fail='restart' op stop interval='0' timeout='90s' on-fail='fence' op migrate_to interval='0' timeout='300s' on-fail='fence' op migrate_from interval='0' timeout='240s' on-fail='restart'" % (strVMname,strXMLfile)
 
 
         p2 = sp.Popen(strPCScmd,shell=True)
