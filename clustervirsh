@@ -32,7 +32,14 @@ class ClusterVirt():
         }
 
         for q in lstHypervisor:
-            self.lstHV.append(libvirt.open(q))
+            insLibvirt = None
+	    try:
+                insLibvirt = libvirt.open(q)
+            except Exception as e :
+                print "LIBVIRT OPEN ERROR(%s):%s" % (q,str(e))
+
+            if(insLibvirt):
+                self.lstHV.append(libvirt.open(q))
 
         # import pprint
         # pprint.pprint(dir(lstHV[0]))
@@ -170,11 +177,14 @@ class ClusterVirt():
     def GetVMHost(self,strVMname):
         for hv in self.lstHV:
             for id in hv.listDomainsID():
-                dom = hv.lookupByID(id)
-                infos = dom.info()
-                if(dom.name() == strVMname):
-                    return hv,dom
-        return None
+		try:
+                    dom = hv.lookupByID(id)
+                    infos = dom.info()
+                    if(dom.name() == strVMname):
+                        return hv,dom
+		except:
+                    pass
+        return None,None
 
     def GetHostByName(self,strHostname):
         for hv in self.lstHV:
