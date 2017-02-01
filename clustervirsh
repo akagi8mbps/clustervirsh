@@ -29,12 +29,11 @@ class ClusterVirt():
             "cons":self.console,
             "clone":self.clone,
             "rollback":self.rollback
-            
         }
 
         for q in lstHypervisor:
             insLibvirt = None
-        try:
+            try:
                 insLibvirt = libvirt.open(q)
                 libvirt.registerErrorHandler(f=self.libvirt_ignore, ctx=None)
             except Exception as e :
@@ -181,12 +180,12 @@ class ClusterVirt():
     def GetVMHost(self,strVMname):
         for hv in self.lstHV:
             for id in hv.listDomainsID():
-        try:
+                try:
                     dom = hv.lookupByID(id)
                     infos = dom.info()
                     if(dom.name() == strVMname):
                         return hv,dom
-        except:
+                except:
                     print "here"
                     pass
         return None,None
