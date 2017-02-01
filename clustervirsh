@@ -1,11 +1,11 @@
 #!/bin/python
+# tama-clustervirsh
 import sys
 import libvirt
 import subprocess as sp
 import re
 from xml.etree.ElementTree import *
 import os.path
-
 
 lstHypervisor = [
     "qemu+ssh://node1/system",
@@ -34,7 +34,7 @@ class ClusterVirt():
 
         for q in lstHypervisor:
             insLibvirt = None
-	    try:
+        try:
                 insLibvirt = libvirt.open(q)
                 libvirt.registerErrorHandler(f=self.libvirt_ignore, ctx=None)
             except Exception as e :
@@ -71,7 +71,7 @@ class ClusterVirt():
 
         #check rbd existing
         if(len(strRBDName) == 0):
-            print "rbd not found "
+            print "rbd not defined in kvm xml"
             return
 
         strCmd = "/bin/rbd info %s" % strRBDName
@@ -81,42 +81,40 @@ class ClusterVirt():
             print strErr
             return
 
-        ######list style is not working .. multiple op xxx ignored by Popen->os.excvp->os.execvpe
-        # strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started'" % (strVMname,strXMLfile)
-        # lstPCScmd = re.split(" ",strPCScmd)
-        # lstPCScmd.append("op start")
-        # lstPCScmd.append("interval='0' timeout='120s' on-fail='restart'")
-        # lstPCScmd.append("op monitor")
-        # lstPCScmd.append("interval='10s' timeout='30s' on-fail='restart'")
-        # lstPCScmd.append("op stop")
-        # lstPCScmd.append("interval='0'")
-        # lstPCScmd.append("timeout='90s'")
-        # lstPCScmd.append("on-fail='fence'")
-        # lstPCScmd.append("op migrate_to")
-        # lstPCScmd.append("interval='0'")
-        # lstPCScmd.append("timeout='300s'")
-        # lstPCScmd.append("on-fail='fence'")
-        # lstPCScmd.append("op migrate_from")
-        # lstPCScmd.append("interval='0'")
-        # lstPCScmd.append("timeout='240s'")
-        # lstPCScmd.append("on-fail='restart'")
-
-        strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started' op start interval='0' timeout='120s' on-fail='restart' op monitor interval='10s' timeout='30s' on-fail='restart' op stop interval='0' timeout='90s' on-fail='fence' op migrate_to interval='0' timeout='300s' on-fail='fence' op migrate_from interval='0' timeout='240s' on-fail='restart'" % (strVMname,strXMLfile)
-
+        strPCScmd = "pcs resource create vm-%s VirtualDomain" % strVMname \
+                  + " hypervisor='qemu:///system' config='%s' migration_transport='ssh'" % strXMLfile \
+                  + " meta allow-migrate='true' target-role='Started' is-managed='true'" \
+                  + " op start interval=0 timeout=120s on-fail='restart'" \
+                  + " op monitor interval=15s timeout=30s on-fail='restart'" \
+                  + " op stop interval=0 timeout=90s on-fail='fence'" \
+                  + " op migrate_to interval=0 timeout=120s on-fail='fence'" \
+                  + " op migrate_from interval=0 timeout=120s on-fail='restart'"
 
         p2 = sp.Popen(strPCScmd,shell=True)
+
         strOut,strErr = p2.communicate()
         if(strErr):
             print "pcs resource add error(%s)" % strErr
             return
 
         print "Added %s to Cluster" % strVMname
-        strPCScmd = "pcs constraint order gluster-clone then vm-%s" % strVMname
+
+        strPCScmd = "pcs constraint location vm-%s rule score=-INFINITY pingd lt 1 or not_defined pingd" % strVMname
         p2 = sp.Popen(strPCScmd,shell=True)
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "pcs resource add error(%s)" % strErr
+            print "pcs constraint add error(%s)" % strErr
             return
+
+        print "Added location for %s" % strVMname
+
+        strPCScmd = "pcs constraint order glusterfs-clone then vm-%s kind=Optional" % strVMname
+        p2 = sp.Popen(strPCScmd,shell=True)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs constraint add error(%s)" % strErr
+            return
+
         print "Added order for %s" % strVMname
 
         sp.Popen(["pcs","resource"])
@@ -124,21 +122,21 @@ class ClusterVirt():
     def DelVM(self,argv,argc):
         strVMname = argv[2]
         strPCScmd = 'pcs resource delete vm-%s' % strVMname
-        p2 = sp.Popen(re.split(" ",strPCScmd))
+        p2 = sp.Popen(re.split(" ",strPCScmd),stdout=sp.PIPE, stderr=sp.PIPE)
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "pcs resource add error(%s)" % strErr
+            print "pcs resource delete error(%s)" % strErr
             return
-        print strOut
+        if(strOut): print strOut;
 
-    def DelImage(eslf,argv,argc):
+    def DelImage(self,argv,argc):
         strImg = argv[2]
         #rbd info sl71-insideharmdev2 | grep parent
         strCmd = "rbd info %s" % (strImg)
         p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "rbd info error(%s)" % strErr
+            print "rbd info error(%s)" % strErr.rstrip()
             return
         if(strOut): print strOut;
 
@@ -154,8 +152,9 @@ class ClusterVirt():
         strCmd = "rbd rm %s" % (strImg)
         p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
         strOut,strErr = p2.communicate()
-        if(strErr):
-            print "rbd rm error(%s)" % strErr
+        # Progress bar seems to be the standard error output.
+        if(strErr and 'Removing image: 100% complete...done.' not in strErr):
+            print "rbd rm error(%s)" % strErr.rstrip()
             return
         print "rbd image removed(%s)" % strImg 
         if(strOut): print strOut;
@@ -166,15 +165,15 @@ class ClusterVirt():
             p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
             strOut,strErr = p2.communicate()
             if(strErr):
-                print "rbd snap create error(%s)" % strErr
+                print "rbd snap unprotect error(%s)" % strErr
                 return
-            print "snap unprotected (%s)" %strParentSnap
+            print "Snap unprotected (%s)" %strParentSnap
             if(strOut): print strOut;
             strCmd = "rbd snap rm %s" % (strParentSnap)
             p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
             strOut,strErr = p2.communicate()
             if(strErr):
-                print "rbd snap create error(%s)" % strErr
+                print "rbd snap rm error(%s)" % strErr
                 return
             print "Snap removed (%s)" %strParentSnap
             if(strOut): print strOut;
@@ -182,12 +181,12 @@ class ClusterVirt():
     def GetVMHost(self,strVMname):
         for hv in self.lstHV:
             for id in hv.listDomainsID():
-		try:
+        try:
                     dom = hv.lookupByID(id)
                     infos = dom.info()
                     if(dom.name() == strVMname):
                         return hv,dom
-		except:
+        except:
                     print "here"
                     pass
         return None,None
@@ -208,7 +207,7 @@ class ClusterVirt():
         p2 = sp.Popen(re.split(" ",strPCScmd))
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "pcs resource add error(%s)" % strErr
+            print "pcs resource move error(%s)" % strErr
             return
         print strOut
         
@@ -311,33 +310,45 @@ class ClusterVirt():
         strXMLFile = argv[2]
         strNewName = argv[3]
 
-        tree = parse(strXMLFile)
-        ele = tree.getroot()
-        # print ele.find(".//uuid").text
-        # print ele.find(".//source").get("name")
-        strOrgName = ele.find(".//name").text
-        strRBDName = ele.find(".//source").get("name")
-
-        import uuid
-        ele.find(".//uuid").text = str(uuid.uuid1())
-        ele.find(".//name").text = strNewName
-        ele.find(".//source").set("name","rbd/"+strNewName)
-        
-        for i in  ele.findall(".//interface"):
-            eleMac = i.find(".//mac")
-            if(eleMac):
-                i.remove(eleMac)
-            # import pprint
-            # pprint.pprint(dir(ele))
-
         strPath = re.sub("\/[^\/]*$","",strXMLFile)
         strNEWXML = strPath+"/"+strNewName+".xml"
         if(os.path.exists(strNEWXML)):
             print "Specified kvm xml file already exist(%s)" % strNEWXML
             return
 
+
+        tree = parse(strXMLFile)
+        ele = tree.getroot()
+        # print ele.find(".//uuid").text
+        # print ele.find(".//source").get("name")
+        #strOrgName = ele.find(".//name").text
+        strRBDName = ele.find(".//source").get("name")
+        strPOOLName,strOrgName = strRBDName.split("/")
+
+        import uuid
+        ele.find(".//uuid").text = str(uuid.uuid1())
+        ele.find(".//name").text = strNewName
+        ele.find(".//source").set("name",strPOOLName+"/"+strNewName)
+        
+        if ele.findall(".//interface/mac"):
+            for i in ele.findall(".//interface"):
+                i.remove(i.find(".//mac"))
+
+        # print ele.find(".//channel[@type='unix']/source").get("path")
+        if ele.findall(".//channel[@type='unix']/source"):
+            for i in ele.findall("channel[@type='unix']"):
+                i.remove(i.find(".//source"))
+
         tree.write(strNEWXML)
 
+        strCmd = "rbd info %s/%s" % (strPOOLName, strNewName)
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+
+        if("No such file or directory" not in strErr):
+            print strOut
+            print "rbd clone error(%s/%s already exists)" % (strPOOLName, strNewName)
+            return
             
         """
         rbd snap create rbd/sl71-harmdev@sl71-harmdev-snap
@@ -348,15 +359,17 @@ class ClusterVirt():
         from datetime import datetime
         strDate = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        strCmd = "rbd snap create rbd/%s@%s-snap-%s" % (strOrgName,
-                                                        strOrgName,
-                                                        strDate)
+        strCmd = "rbd snap create %s@%s-snap-%s" % ( strRBDName,
+                                                     strOrgName,
+                                                     strDate)
+
+
         p2 = sp.Popen(re.split(" ",strCmd))
         strOut,strErr = p2.communicate()
         if(strErr):
             print "rbd snap create error(%s)" % strErr
             return
-        print strOut
+        if(strOut): print strOut;
 
         strCmd = "rbd snap protect %s@%s-snap-%s" % (strRBDName,
                                                      strOrgName,
@@ -366,18 +379,22 @@ class ClusterVirt():
         if(strErr):
             print "rbd snap protect error(%s)" % strErr
             return
-        print strOut
+        if(strOut): print strOut;
 
-        strCmd = "rbd clone %s@%s-snap-%s rbd/%s" % (strRBDName,
-                                                         strOrgName,
-                                                         strDate,
-                                                         strNewName)
+        strCmd = "rbd clone %s@%s-snap-%s %s/%s" % ( strRBDName,
+                                                     strOrgName,
+                                                     strDate,
+                                                     strPOOLName,
+                                                     strNewName)
+
         p2 = sp.Popen(re.split(" ",strCmd))
         strOut,strErr = p2.communicate()
         if(strErr):
             print "rbd clone error(%s)" % strErr
             return
-        print strOut
+        if(strOut): print strOut;
+
+        print "rbd image created(%s/%s)" % (strPOOLName, strNewName)
         
     def DispatchFunc(self):
         argv = sys.argv
