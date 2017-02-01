@@ -27,16 +27,28 @@ class ClusterVirt():
             "m":self.migrate,
             "console":self.console,
             "cons":self.console,
-            "clone":self.clone
+            "clone":self.clone,
+            "rollback":self.rollback
             
         }
 
         for q in lstHypervisor:
-            self.lstHV.append(libvirt.open(q))
+            insLibvirt = None
+	    try:
+                insLibvirt = libvirt.open(q)
+                libvirt.registerErrorHandler(f=self.libvirt_ignore, ctx=None)
+            except Exception as e :
+                #print "LIBVIRT OPEN ERROR(%s):%s" % (q,str(e))
+                pass
+
+            if(insLibvirt):
+                self.lstHV.append(libvirt.open(q))
 
         # import pprint
         # pprint.pprint(dir(lstHV[0]))
 
+    def libvirt_ignore(ignore, err):
+        pass
 
     def ShowGuests(self,argv,argc):
         for hv in self.lstHV:
@@ -97,6 +109,16 @@ class ClusterVirt():
         if(strErr):
             print "pcs resource add error(%s)" % strErr
             return
+
+        print "Added %s to Cluster" % strVMname
+        strPCScmd = "pcs constraint order gluster-clone then vm-%s" % strVMname
+        p2 = sp.Popen(strPCScmd,shell=True)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs resource add error(%s)" % strErr
+            return
+        print "Added order for %s" % strVMname
+
         sp.Popen(["pcs","resource"])
 
     def DelVM(self,argv,argc):
@@ -160,11 +182,15 @@ class ClusterVirt():
     def GetVMHost(self,strVMname):
         for hv in self.lstHV:
             for id in hv.listDomainsID():
-                dom = hv.lookupByID(id)
-                infos = dom.info()
-                if(dom.name() == strVMname):
-                    return hv,dom
-        return None
+		try:
+                    dom = hv.lookupByID(id)
+                    infos = dom.info()
+                    if(dom.name() == strVMname):
+                        return hv,dom
+		except:
+                    print "here"
+                    pass
+        return None,None
 
     def GetHostByName(self,strHostname):
         for hv in self.lstHV:
@@ -197,6 +223,86 @@ class ClusterVirt():
             return
         print "virsh -c qemu+ssh://%s/system console %s" % (hv.getHostname(),strVMname)
 
+    def rollback(self,argv,argc):
+        if(not argc == 3):
+            print "invalid argment: console vmname"
+            return
+        strVMname = argv[2]
+        hv,dom = self.GetVMHost(strVMname)
+
+        isLaunched = True
+        if(hv == None):
+            isLaunched=False
+            print "No vm launched"
+            
+        #check vm status
+        p1 = sp.Popen(["pcs","resource"],stdout=sp.PIPE, stderr=sp.PIPE)
+        p2 = sp.Popen(["grep","vm-%s"%strVMname],stdin=p1.stdout,stdout=sp.PIPE)
+        p1.stdout.close()
+        strOut,strErr = p2.communicate()
+        print strOut
+        lstOut = re.split("\n",strOut)
+        for l in lstOut:
+            reRet1 = re.search("vm-%s +",l)
+            if(reRet1):
+                reRet2 = re.search(": Stopped ",l)
+                if(reRet2):
+                    isLaunched=False
+                
+        print "Launched: "+str(isLaunched)
+
+        if(isLaunched):
+            #disable vm
+            strCmd = "pcs resource disable vm-%s" % strVMname
+            print strCmd
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "(%s)" % strErr
+                return
+            print strOut
+            #destroy vm
+            strCmd = "virsh -c qemu+ssh://%s/system destroy %s" % (hv.getHostname(),strVMname)
+            print strCmd
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "(%s)" % strErr
+                return
+            print strOut
+
+        #show rollback item list
+        strCmd = "rbd snap ls %s" % strVMname
+        print strCmd
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "(%s)" % strErr
+            return
+        print strOut
+        #input rollback
+        print "Input snap name:"
+        strSnapname = raw_input()
+        #rollback
+        strCmd = "rbd snap rollback %s@%s" % (strVMname,strSnapname)
+        print strCmd
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "(%s)" % strErr
+            return
+        print strOut
+
+        #disable vm
+        strCmd = "pcs resource enable vm-%s" % strVMname
+        print strCmd
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "(%s)" % strErr
+            return
+        print strOut
+        
     def clone(self,argv,argc):
         if(not argc == 4):
             print "invalid argment: clone xmlfilePath newvmname"
@@ -218,7 +324,9 @@ class ClusterVirt():
         ele.find(".//source").set("name","rbd/"+strNewName)
         
         for i in  ele.findall(".//interface"):
-            i.remove(i.find(".//mac"))
+            eleMac = i.find(".//mac")
+            if(eleMac):
+                i.remove(eleMac)
             # import pprint
             # pprint.pprint(dir(ele))
 
