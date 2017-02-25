@@ -19,17 +19,14 @@ class ClusterVirt():
         self.dicFunc = {
             "list":self.ShowGuests,
             "addvm":self.AddVM2PCS,
-            "a":self.AddVM2PCS,
             "delvm":self.DelVM,
-            "d":self.DelVM,
             "delimage":self.DelImage,
             "migrate":self.migrate,
-            "m":self.migrate,
             "console":self.console,
-            "cons":self.console,
             "clone":self.clone,
-            "rollback":self.rollback
-            
+            "rollback":self.rollback,
+            "dis":self.dis,
+            "ena":self.ena
         }
 
         for q in lstHypervisor:
@@ -348,8 +345,8 @@ class ClusterVirt():
         from datetime import datetime
         strDate = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        strCmd = "rbd snap create rbd/%s@%s-snap-%s" % (strOrgName,
-                                                        strOrgName,
+        strCmd = "rbd snap create rbd/%s@%s-clone-%s" % (strOrgName,
+                                                        strNewName,
                                                         strDate)
         p2 = sp.Popen(re.split(" ",strCmd))
         strOut,strErr = p2.communicate()
@@ -358,8 +355,8 @@ class ClusterVirt():
             return
         print strOut
 
-        strCmd = "rbd snap protect %s@%s-snap-%s" % (strRBDName,
-                                                     strOrgName,
+        strCmd = "rbd snap protect %s@%s-clone-%s" % (strRBDName,
+                                                     strNewName,
                                                      strDate)
         p2 = sp.Popen(re.split(" ",strCmd))
         strOut,strErr = p2.communicate()
@@ -368,8 +365,8 @@ class ClusterVirt():
             return
         print strOut
 
-        strCmd = "rbd clone %s@%s-snap-%s rbd/%s" % (strRBDName,
-                                                         strOrgName,
+        strCmd = "rbd clone %s@%s-clone-%s rbd/%s" % (strRBDName,
+                                                         strNewName,
                                                          strDate,
                                                          strNewName)
         p2 = sp.Popen(re.split(" ",strCmd))
@@ -378,16 +375,51 @@ class ClusterVirt():
             print "rbd clone error(%s)" % strErr
             return
         print strOut
+
+
+    def ena(self,argv,argc):
+        self.disena(argv,argc,"enable")
+
+    def dis(self,argv,argc):
+        self.disena(argv,argc,"disable")
+
+    def disena(self,argv,argc,strOpr):
+        strVMname = argv[2]
+        strPCScmd = 'pcs resource %s vm-%s' % (strOpr,strVMname)
+        p2 = sp.Popen(re.split(" ",strPCScmd))
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs resource disable error(%s)" % strErr
+            return
+        print strOut
         
+    def GuessFunc(self,strOpr):
+        lstRet = []
+        for k,v in self.dicFunc.items():
+            if(re.match(strOpr,k)):
+                lstRet.append({"str":k,"func":v})
+        if(len(lstRet) == 1):
+            return lstRet[0]["func"]
+        elif(len(lstRet) == 0):
+            return "No matching operation"
+        else:
+            lstKeys = []
+            for k in lstRet:
+                lstKeys.append(k["str"])
+            return "Operation is ambiguous: "+",".join(lstKeys)
+
     def DispatchFunc(self):
         argv = sys.argv
         argc = len(argv)
         if(argc == 1):
             argv.append("list")
-        # try:
-        self.dicFunc[argv[1]](argv,argc)
-        # except:
-        #     print "err"
+
+        strFunc = self.GuessFunc(argv[1])
+        if(isinstance(strFunc,str)):
+            print "%s" % strFunc
+            sys.exit(0)
+        else:
+            strFunc(argv,argc)
 
 if __name__ == "__main__":
 
