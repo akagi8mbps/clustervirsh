@@ -20,8 +20,8 @@ class ClusterVirt():
             "console":self.console,
             "clone":self.clone,
             "rollback":self.rollback,
-            "dis":self.dis,
-            "ena":self.ena
+            "disable":self.dis,
+            "enable":self.ena
         }
         self.lstHypervisor = Mconfig.lstHypervisor
 
