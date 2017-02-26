@@ -25,7 +25,7 @@ class ClusterVirt():
         }
         self.lstHypervisor = Mconfig.lstHypervisor
 
-        for q in serf.lstHypervisor:
+        for q in self.lstHypervisor:
             insLibvirt = None
 	    try:
                 insLibvirt = libvirt.open(q)
