@@ -6,13 +6,7 @@ import subprocess as sp
 import re
 from xml.etree.ElementTree import *
 import os.path
-
-
-lstHypervisor = [
-    "qemu+ssh://node1/system",
-    "qemu+ssh://node2/system",
-    "qemu+ssh://node3/system"
-]
+import Mconfig
 
 class ClusterVirt():
     def __init__(self):
@@ -29,8 +23,9 @@ class ClusterVirt():
             "dis":self.dis,
             "ena":self.ena
         }
+        self.lstHypervisor = Mconfig.lstHypervisor
 
-        for q in lstHypervisor:
+        for q in serf.lstHypervisor:
             insLibvirt = None
 	    try:
                 insLibvirt = libvirt.open(q)
