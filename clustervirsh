@@ -135,14 +135,41 @@ class ClusterVirt():
             return
         if(strOut): print strOut;
 
+        #get parent info
         strParentSnap = None
         for l in strOut.split("\n"):
             #        parent: rbd/sl71-insideharmdev@sl71-insideharmdev-snap-20160510112814
-            reRet = re.match("^[ \t]+parent: (.*$)",l)
+            reRet = re.search("parent: rbd/(.*$)",l)
             if(reRet):
                 strParentSnap = reRet.group(1)
                 print strParentSnap
                 break
+
+        #check snap
+        strCmd = "rbd snap ls %s" % (strImg)
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd snap ls error(%s)" % strErr
+            return
+        if(strOut): print strOut;
+
+        for l in strOut.split("\n"):
+            """
+SNAPID NAME        SIZE
+   487 fjdiso  51200 MB
+   488 4382915 51200 MB
+            """
+            reRet = re.search("^ +[0-9]+ ([^ ]*) .*$",l)
+            if(reRet):
+                strCmd = "rbd snap rm %s@%s" % (strImg,reRet.group(1))
+                p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+                if(strErr):
+                    print "rbd snap rm error(%s)" % strErr
+                    return
+                if(strOut): print strOut;
+
+
 
         strCmd = "rbd rm %s" % (strImg)
         p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
@@ -153,13 +180,13 @@ class ClusterVirt():
         print "rbd image removed(%s)" % strImg 
         if(strOut): print strOut;
 
-        if(strParentSnap): # snap available
+        if(strParentSnap and len(strParentSnap)): # snap available
             print "This rbd image was created from %s" %strParentSnap
             strCmd = "rbd snap unprotect %s" % (strParentSnap)
             p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
             strOut,strErr = p2.communicate()
             if(strErr):
-                print "rbd snap create error(%s)" % strErr
+                print "rbd snap unprotect error(%s)" % strErr
                 return
             print "snap unprotected (%s)" %strParentSnap
             if(strOut): print strOut;
@@ -167,7 +194,7 @@ class ClusterVirt():
             p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
             strOut,strErr = p2.communicate()
             if(strErr):
-                print "rbd snap create error(%s)" % strErr
+                print "rbd snap rm error(%s)" % strErr
                 return
             print "Snap removed (%s)" %strParentSnap
             if(strOut): print strOut;
