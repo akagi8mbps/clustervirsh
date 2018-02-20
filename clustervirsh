@@ -7,6 +7,7 @@ import re
 from xml.etree.ElementTree import *
 import os.path
 import Mconfig
+import time
 
 class ClusterVirt():
     def __init__(self):
@@ -133,17 +134,22 @@ class ClusterVirt():
         if(strErr):
             print "rbd info error(%s)" % strErr
             return
-        if(strOut): print strOut;
+        if(strOut):
+            print "SNAP available "
+            print strOut
 
         #get parent info
         strParentSnap = None
         for l in strOut.split("\n"):
             #        parent: rbd/sl71-insideharmdev@sl71-insideharmdev-snap-20160510112814
-            reRet = re.search("parent: rbd/(.*$)",l)
+            print l
+            reRet = re.search("parent: rbd/(.*)$",l)
             if(reRet):
                 strParentSnap = reRet.group(1)
                 print strParentSnap
                 break
+        if(strParentSnap):
+            print "ParentFound:"+strParentSnap
 
         #check snap
         strCmd = "rbd snap ls %s" % (strImg)
@@ -167,18 +173,55 @@ SNAPID NAME        SIZE
                 if(strErr):
                     print "rbd snap rm error(%s)" % strErr
                     return
-                if(strOut): print strOut;
+                print "snap removed:%s@%s" % (strImg,reRet.group(1))
 
+        #wait for snap remove
+        bClean = False
+        for i in range(0,10):
+            print "Waiting for cleanup snap (%d)" % i
+            strCmd = "rbd snap ls %s" % (strImg)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "rbd snap ls error(%s)" % strErr
+                return
+            if(strOut):
+                print strOut
+                time.sleep(1)
+            else:
+                print "Removed all snap"
+                bClean = True
+                break;
+        if(bClean is False):
+            print "SNAP cleanup failed, some snap are protected or need more time to remove, If you created a lot of snaps, you may launch this command again"
+            return
 
-
+        #remove cloned rbd image
         strCmd = "rbd rm %s" % (strImg)
         p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
         strOut,strErr = p2.communicate()
-        if(strErr):
-            print "rbd rm error(%s)" % strErr
-            return
         print "rbd image removed(%s)" % strImg 
         if(strOut): print strOut;
+
+
+        #waiting for remove fininsh
+        bClean = False
+        for i in range(0,30):
+            strCmd = "rbd info %s" % (strImg)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(re.match("rbd: error opening image",strErr)):
+                print "rbd removed"
+                bClean = True
+                break;
+            else:
+                print "image still available(%d)" % i
+            time.sleep(1)
+        
+        if(bClean is False):
+            print "rbd remove failed check rbd manually"
+            return
+
 
         if(strParentSnap and len(strParentSnap)): # snap available
             print "This rbd image was created from %s" %strParentSnap
