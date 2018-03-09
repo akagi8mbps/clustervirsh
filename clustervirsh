@@ -46,12 +46,29 @@ class ClusterVirt():
 
     def ShowGuests(self,argv,argc):
         for hv in self.lstHV:
-            print hv.getHostname() + "-"*60
+            print(hv.getHostname() + "--------------------------------")
+
+            lstRet = []
             for id in hv.listDomainsID():
                 dom = hv.lookupByID(id)
                 infos = dom.info()
-                print '  %d\t%s\t%d\t%d\t%d\t%d' % (id,dom.name(),infos[0],infos[1],infos[3],infos[2])
+                dicState = { 0:"NOSTATE",
+                             1:"RUNNING",
+                             2:"BLOCKED",
+                             3:"PAUSED ",
+                             4:"SHUTDOW",
+                             5:"SHUTOFF",
+                             6:"CRASHED",
+                             7:"SUSPEND",
+                             8:"LAST   "}
+                lstRet.append([dom.name(),dicState[infos[0]],infos[1],infos[3],infos[2]])
 
+            lstTitle = ["Name","State","MAXmem","CPUs","MEM"]
+            row_format ="{:>20}{:>10}{:>10}{:>5}{:>10}"
+            print(row_format.format(*lstTitle))
+            for row in lstRet:
+                print(row_format.format(*row))
+            print("")
     def AddVM2PCS(self,argv,argc):
         strXMLfile = argv[2]
         if(not os.path.exists(strXMLfile)):
