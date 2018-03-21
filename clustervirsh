@@ -8,6 +8,7 @@ from xml.etree.ElementTree import *
 import os.path
 import Mconfig
 import time
+import threading
 
 class ClusterVirt():
     def __init__(self):
@@ -26,7 +27,7 @@ class ClusterVirt():
         }
         self.lstHypervisor = Mconfig.lstHypervisor
 
-        for q in self.lstHypervisor:
+        def ConnectHV(q):
             insLibvirt = None
 	    try:
                 insLibvirt = libvirt.open(q)
@@ -37,6 +38,15 @@ class ClusterVirt():
 
             if(insLibvirt):
                 self.lstHV.append(libvirt.open(q))
+
+        for q in self.lstHypervisor:
+            t = threading.Thread(target=ConnectHV,args=([q]))
+            t.setDaemon(True)
+            t.start()
+        while True:
+            tlist=threading.enumerate()
+            if len(tlist) < 2: break
+            time.sleep(1)
 
         # import pprint
         # pprint.pprint(dir(lstHV[0]))
@@ -112,7 +122,14 @@ class ClusterVirt():
         # lstPCScmd.append("timeout='240s'")
         # lstPCScmd.append("on-fail='restart'")
 
-        strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started' op start interval='0' timeout='120s' on-fail='restart' op monitor interval='10s' timeout='30s' on-fail='restart' op stop interval='0' timeout='90s' on-fail='fence' op migrate_to interval='0' timeout='300s' on-fail='fence' op migrate_from interval='0' timeout='240s' on-fail='restart'" % (strVMname,strXMLfile)
+        strPCScmd = "pcs resource create vm-%s VirtualDomain" % strVMname \
+                  + " hypervisor='qemu:///system' config='%s' migration_transport='ssh'" % strXMLfile \
+                  + " meta allow-migrate='true' target-role='Started' is-managed='true'" \
+                  + " op start interval=0 timeout=120s on-fail='restart'" \
+                  + " op monitor interval=15s timeout=30s on-fail='restart'" \
+                  + " op stop interval=0 timeout=90s on-fail='fence'" \
+                  + " op migrate_to interval=0 timeout=120s on-fail='fence'" \
+                  + " op migrate_from interval=0 timeout=120s on-fail='restart'"
 
 
         p2 = sp.Popen(strPCScmd,shell=True)
@@ -122,12 +139,21 @@ class ClusterVirt():
             return
 
         print "Added %s to Cluster" % strVMname
+
+        # strPCScmd = "pcs constraint location vm-%s rule score=-INFINITY pingd lt 1 or not_defined pingd" % strVMname
+        # p2 = sp.Popen(strPCScmd,shell=True)
+        # strOut,strErr = p2.communicate()
+        # if(strErr):
+        #     print "pcs constraint add error(%s)" % strErr
+        #     return
+        # print "Added location for %s" % strVMname
+
         strPCScmd = "pcs constraint order gluster-clone then vm-%s" % strVMname
         p2 = sp.Popen(strPCScmd,shell=True)
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "pcs resource add error(%s)" % strErr
-            return
+          print "pcs constraint add error(%s)" % strErr
+          return
         print "Added order for %s" % strVMname
 
         sp.Popen(["pcs","resource"])
@@ -135,21 +161,22 @@ class ClusterVirt():
     def DelVM(self,argv,argc):
         strVMname = argv[2]
         strPCScmd = 'pcs resource delete vm-%s' % strVMname
-        p2 = sp.Popen(re.split(" ",strPCScmd))
+        p2 = sp.Popen(re.split(" ",strPCScmd),stdout=sp.PIPE, stderr=sp.PIPE)
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "pcs resource add error(%s)" % strErr
+            print "pcs resource delete error(%s)" % strErr
             return
         print strOut
+        print "finished to delte vm from pcs , you may also delte rbd by delimage command"
 
-    def DelImage(eslf,argv,argc):
+    def DelImage(self,argv,argc):
         strImg = argv[2]
         #rbd info sl71-insideharmdev2 | grep parent
         strCmd = "rbd info %s" % (strImg)
         p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "rbd info error(%s)" % strErr
+            print "rbd info error(%s)" % strErr.rstrip()
             return
         if(strOut):
             print "SNAP available "
@@ -175,7 +202,9 @@ class ClusterVirt():
         if(strErr):
             print "rbd snap ls error(%s)" % strErr
             return
-        if(strOut): print strOut;
+        if(strOut):
+            print "SNAP available "
+            print strOut
 
         for l in strOut.split("\n"):
             """
@@ -288,7 +317,7 @@ SNAPID NAME        SIZE
         p2 = sp.Popen(re.split(" ",strPCScmd))
         strOut,strErr = p2.communicate()
         if(strErr):
-            print "pcs resource add error(%s)" % strErr
+            print "pcs resource move error(%s)" % strErr
             return
         print strOut
         
@@ -395,13 +424,13 @@ SNAPID NAME        SIZE
         ele = tree.getroot()
         # print ele.find(".//uuid").text
         # print ele.find(".//source").get("name")
-        strOrgName = ele.find(".//name").text
         strRBDName = ele.find(".//source").get("name")
+        strPOOLName,strOrgName = strRBDName.split("/")
 
         import uuid
         ele.find(".//uuid").text = str(uuid.uuid1())
         ele.find(".//name").text = strNewName
-        ele.find(".//source").set("name","rbd/"+strNewName)
+        ele.find(".//source").set("name",strPOOLName+"/"+strNewName)
         
         for i in  ele.findall(".//interface"):
             eleMac = i.find(".//mac")
@@ -428,7 +457,8 @@ SNAPID NAME        SIZE
         from datetime import datetime
         strDate = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        strCmd = "rbd snap create rbd/%s@%s-clone-%s" % (strOrgName,
+        strCmd = "rbd snap create %s/%s@%s-clone-%s" % (strPOOLName,
+                                                        strOrgName,
                                                         strNewName,
                                                         strDate)
         p2 = sp.Popen(re.split(" ",strCmd))
