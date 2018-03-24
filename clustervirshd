@@ -1,0 +1,560 @@
+# -*- coding: utf-8 -*-
+from flask import Flask,request,Response,g,current_app
+from flask_restful import Api,Resource,reqparse
+import os
+import sys
+import libvirt
+import subprocess as sp
+import re
+from xml.etree.ElementTree import *
+import os.path
+import Mconfig
+import time
+import threading
+from datetime import datetime as dt
+
+class ClusterVirt():
+    def __init__(self):
+        self.lstHV = []
+        self.dicFunc = {
+            "list":self.ShowGuests,
+            "addvm":self.AddVM2PCS,
+            "delvm":self.DelVM,
+            "delimage":self.DelImage,
+            "migrate":self.migrate,
+            "console":self.console,
+            "clone":self.clone,
+            "rollback":self.rollback,
+            "disable":self.dis,
+            "enable":self.ena
+        }
+        self.lstHypervisor = Mconfig.lstHypervisor
+
+        def ConnectHV(q):
+            insLibvirt = None
+	    try:
+                insLibvirt = libvirt.open(q)
+                libvirt.registerErrorHandler(f=self.libvirt_ignore, ctx=None)
+            except Exception as e :
+                #print "LIBVIRT OPEN ERROR(%s):%s" % (q,str(e))
+                pass
+
+            if(insLibvirt):
+                self.lstHV.append(libvirt.open(q))
+
+        for q in self.lstHypervisor:
+            t = threading.Thread(target=ConnectHV,args=([q]))
+            t.setDaemon(True)
+            t.start()
+        while True:
+            tlist=threading.enumerate()
+            if len(tlist) < 2: break
+            time.sleep(0.3)
+
+        # import pprint
+        # pprint.pprint(dir(lstHV[0]))
+
+    def libvirt_ignore(ignore, err):
+        pass
+
+    def ShowGuests(self,argv,argc):
+        lstRetTotal = []
+        for hv in self.lstHV:
+
+            print(hv.getHostname() + "--------------------------------")
+
+            lstRet = []
+            for id in hv.listDomainsID():
+                dom = hv.lookupByID(id)
+                infos = dom.info()
+                dicState = { 0:"NOSTATE",
+                             1:"RUNNING",
+                             2:"BLOCKED",
+                             3:"PAUSED ",
+                             4:"SHUTDOW",
+                             5:"SHUTOFF",
+                             6:"CRASHED",
+                             7:"SUSPEND",
+                             8:"LAST   "}
+                lstRet.append([dom.name(),dicState[infos[0]],infos[1],infos[3],infos[2]])
+                lstRetTotal.append([hv.getHostname(),dom.name(),dicState[infos[0]],infos[1],infos[3],infos[2]])
+
+            lstTitle = ["Name","State","MAXmem","CPUs","MEM"]
+            row_format ="{:>20}{:>10}{:>10}{:>5}{:>10}"
+            print(row_format.format(*lstTitle))
+
+            for row in lstRet:
+                print(row_format.format(*row))
+            print("")
+        return lstRetTotal
+
+    def AddVM2PCS(self,argv,argc):
+        strXMLfile = argv[2]
+        if(not os.path.exists(strXMLfile)):
+            print "Specified kvm xml file not exist(%s)" % strXMLfile
+            return
+
+        tree = parse(strXMLfile)
+        ele = tree.getroot()
+        strVMname = ele.find(".//name").text
+        strRBDName = ele.find(".//source").get("name")
+
+        #check rbd existing
+        if(len(strRBDName) == 0):
+            print "rbd not found "
+            return
+
+        strCmd = "/bin/rbd info %s" % strRBDName
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print strErr
+            return
+
+        ######list style is not working .. multiple op xxx ignored by Popen->os.excvp->os.execvpe
+        # strPCScmd = "pcs resource create vm-%s VirtualDomain hypervisor='qemu:///system' config='%s' migration_transport='ssh' meta allow-migrate='true' target-role='Started'" % (strVMname,strXMLfile)
+        # lstPCScmd = re.split(" ",strPCScmd)
+        # lstPCScmd.append("op start")
+        # lstPCScmd.append("interval='0' timeout='120s' on-fail='restart'")
+        # lstPCScmd.append("op monitor")
+        # lstPCScmd.append("interval='10s' timeout='30s' on-fail='restart'")
+        # lstPCScmd.append("op stop")
+        # lstPCScmd.append("interval='0'")
+        # lstPCScmd.append("timeout='90s'")
+        # lstPCScmd.append("on-fail='fence'")
+        # lstPCScmd.append("op migrate_to")
+        # lstPCScmd.append("interval='0'")
+        # lstPCScmd.append("timeout='300s'")
+        # lstPCScmd.append("on-fail='fence'")
+        # lstPCScmd.append("op migrate_from")
+        # lstPCScmd.append("interval='0'")
+        # lstPCScmd.append("timeout='240s'")
+        # lstPCScmd.append("on-fail='restart'")
+
+        strPCScmd = "pcs resource create vm-%s VirtualDomain" % strVMname \
+                  + " hypervisor='qemu:///system' config='%s' migration_transport='ssh'" % strXMLfile \
+                  + " meta allow-migrate='true' target-role='Started' is-managed='true'" \
+                  + " op start interval=0 timeout=120s on-fail='restart'" \
+                  + " op monitor interval=15s timeout=60s on-fail='restart'" \
+                  + " op stop interval=0 timeout=90s on-fail='stop'" \
+                  + " op migrate_to interval=0 timeout=120s on-fail='restart'" \
+                  + " op migrate_from interval=0 timeout=120s on-fail='restart'"
+
+
+        p2 = sp.Popen(strPCScmd,shell=True)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs resource add error(%s)" % strErr
+            return
+
+        print "Added %s to Cluster" % strVMname
+
+        # strPCScmd = "pcs constraint location vm-%s rule score=-INFINITY pingd lt 1 or not_defined pingd" % strVMname
+        # p2 = sp.Popen(strPCScmd,shell=True)
+        # strOut,strErr = p2.communicate()
+        # if(strErr):
+        #     print "pcs constraint add error(%s)" % strErr
+        #     return
+        # print "Added location for %s" % strVMname
+
+        strPCScmd = "pcs constraint order gluster-clone then vm-%s" % strVMname
+        p2 = sp.Popen(strPCScmd,shell=True)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+          print "pcs constraint add error(%s)" % strErr
+          return
+        print "Added order for %s" % strVMname
+
+        sp.Popen(["pcs","resource"])
+
+    def DelVM(self,argv,argc):
+        strVMname = argv[2]
+        strPCScmd = 'pcs resource delete vm-%s' % strVMname
+        p2 = sp.Popen(re.split(" ",strPCScmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs resource delete error(%s)" % strErr
+            return
+        print strOut
+        print "finished to delte vm from pcs , you may also delte rbd by delimage command"
+
+    def DelImage(self,argv,argc):
+        strImg = argv[2]
+        #rbd info sl71-insideharmdev2 | grep parent
+        strCmd = "rbd info %s" % (strImg)
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd info error(%s)" % strErr.rstrip()
+            return
+        if(strOut):
+            print "SNAP available "
+            print strOut
+
+        #get parent info
+        strParentSnap = None
+        for l in strOut.split("\n"):
+            #        parent: rbd/sl71-insideharmdev@sl71-insideharmdev-snap-20160510112814
+            print l
+            reRet = re.search("parent: rbd/(.*)$",l)
+            if(reRet):
+                strParentSnap = reRet.group(1)
+                print strParentSnap
+                break
+        if(strParentSnap):
+            print "ParentFound:"+strParentSnap
+
+        #check snap
+        strCmd = "rbd snap ls %s" % (strImg)
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd snap ls error(%s)" % strErr
+            return
+        if(strOut):
+            print "SNAP available "
+            print strOut
+
+        for l in strOut.split("\n"):
+            """
+SNAPID NAME        SIZE
+   487 fjdiso  51200 MB
+   488 4382915 51200 MB
+            """
+            reRet = re.search("^ +[0-9]+ ([^ ]*) .*$",l)
+            if(reRet):
+                strCmd = "rbd snap rm %s@%s" % (strImg,reRet.group(1))
+                p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+                if(strErr):
+                    print "rbd snap rm error(%s)" % strErr
+                    return
+                print "snap removed:%s@%s" % (strImg,reRet.group(1))
+
+        #wait for snap remove
+        bClean = False
+        for i in range(0,10):
+            print "Waiting for cleanup snap (%d)" % i
+            strCmd = "rbd snap ls %s" % (strImg)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "rbd snap ls error(%s)" % strErr
+                return
+            if(strOut):
+                print strOut
+                time.sleep(1)
+            else:
+                print "Removed all snap"
+                bClean = True
+                break;
+        if(bClean is False):
+            print "SNAP cleanup failed, some snap are protected or need more time to remove, If you created a lot of snaps, you may launch this command again"
+            return
+
+        #remove cloned rbd image
+        strCmd = "rbd rm %s" % (strImg)
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        print "rbd image removed(%s)" % strImg 
+        if(strOut): print strOut;
+
+
+        #waiting for remove fininsh
+        bClean = False
+        for i in range(0,30):
+            strCmd = "rbd info %s" % (strImg)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(re.match("rbd: error opening image",strErr)):
+                print "rbd removed"
+                bClean = True
+                break;
+            else:
+                print "image still available(%d)" % i
+            time.sleep(1)
+        
+        if(bClean is False):
+            print "rbd remove failed check rbd manually"
+            return
+
+
+        if(strParentSnap and len(strParentSnap)): # snap available
+            print "This rbd image was created from %s" %strParentSnap
+            strCmd = "rbd snap unprotect %s" % (strParentSnap)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "rbd snap unprotect error(%s)" % strErr
+                return
+            print "snap unprotected (%s)" %strParentSnap
+            if(strOut): print strOut;
+            strCmd = "rbd snap rm %s" % (strParentSnap)
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE, stderr=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "rbd snap rm error(%s)" % strErr
+                return
+            print "Snap removed (%s)" %strParentSnap
+            if(strOut): print strOut;
+
+    def GetVMHost(self,strVMname):
+        for hv in self.lstHV:
+            for id in hv.listDomainsID():
+		try:
+                    dom = hv.lookupByID(id)
+                    infos = dom.info()
+                    if(dom.name() == strVMname):
+                        return hv,dom
+		except:
+                    print "here"
+                    pass
+        return None,None
+
+    def GetHostByName(self,strHostname):
+        for hv in self.lstHV:
+            if(hv.getHostname() == strHostname):
+                return hv
+        return None
+
+    def migrate(self,argv,argc):
+        if(not argc == 4):
+            print "invalid argment: migrate vmname migrateto"
+            return
+        strVMname = argv[2]
+        strNewHost = argv[3]
+        strPCScmd = 'pcs resource move %s %s' % (strVMname,strNewHost)
+        p2 = sp.Popen(re.split(" ",strPCScmd))
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs resource move error(%s)" % strErr
+            return
+        print strOut
+        
+    def console(self,argv,argc):
+        if(not argc == 3):
+            print "invalid argment: console vmname"
+            return
+        strVMname = argv[2]
+        hv,dom = self.GetVMHost(strVMname)
+        if(hv == None):
+            print "No vm found"
+            return
+        print "virsh -c qemu+ssh://%s/system console %s" % (hv.getHostname(),strVMname)
+
+    def rollback(self,argv,argc):
+        if(not argc == 3):
+            print "invalid argment: console vmname"
+            return
+        strVMname = argv[2]
+        hv,dom = self.GetVMHost(strVMname)
+
+        isLaunched = True
+        if(hv == None):
+            isLaunched=False
+            print "No vm launched"
+            
+        #check vm status
+        p1 = sp.Popen(["pcs","resource"],stdout=sp.PIPE, stderr=sp.PIPE)
+        p2 = sp.Popen(["grep","vm-%s"%strVMname],stdin=p1.stdout,stdout=sp.PIPE)
+        p1.stdout.close()
+        strOut,strErr = p2.communicate()
+        print strOut
+        lstOut = re.split("\n",strOut)
+        for l in lstOut:
+            reRet1 = re.search("vm-%s +",l)
+            if(reRet1):
+                reRet2 = re.search(": Stopped ",l)
+                if(reRet2):
+                    isLaunched=False
+                
+        print "Launched: "+str(isLaunched)
+
+        if(isLaunched):
+            #disable vm
+            strCmd = "pcs resource disable vm-%s" % strVMname
+            print strCmd
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "(%s)" % strErr
+                return
+            print strOut
+            #destroy vm
+            strCmd = "virsh -c qemu+ssh://%s/system destroy %s" % (hv.getHostname(),strVMname)
+            print strCmd
+            p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+            strOut,strErr = p2.communicate()
+            if(strErr):
+                print "(%s)" % strErr
+                return
+            print strOut
+
+        #show rollback item list
+        strCmd = "rbd snap ls %s" % strVMname
+        print strCmd
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "(%s)" % strErr
+            return
+        print strOut
+        #input rollback
+        print "Input snap name:"
+        strSnapname = raw_input()
+        #rollback
+        strCmd = "rbd snap rollback %s@%s" % (strVMname,strSnapname)
+        print strCmd
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "(%s)" % strErr
+            return
+        print strOut
+
+        #disable vm
+        strCmd = "pcs resource enable vm-%s" % strVMname
+        print strCmd
+        p2 = sp.Popen(re.split(" ",strCmd),stdout=sp.PIPE)
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "(%s)" % strErr
+            return
+        print strOut
+        
+    def clone(self,argv,argc):
+        if(not argc == 4):
+            print "invalid argment: clone xmlfilePath newvmname"
+            return
+
+        strXMLFile = argv[2]
+        strNewName = argv[3]
+
+        tree = parse(strXMLFile)
+        ele = tree.getroot()
+        # print ele.find(".//uuid").text
+        # print ele.find(".//source").get("name")
+        strRBDName = ele.find(".//source").get("name")
+        strPOOLName,strOrgName = strRBDName.split("/")
+
+        import uuid
+        ele.find(".//uuid").text = str(uuid.uuid1())
+        ele.find(".//name").text = strNewName
+        ele.find(".//source").set("name",strPOOLName+"/"+strNewName)
+        
+        for i in  ele.findall(".//interface"):
+            eleMac = i.find(".//mac")
+            if(eleMac):
+                i.remove(eleMac)
+            # import pprint
+            # pprint.pprint(dir(ele))
+
+        strPath = re.sub("\/[^\/]*$","",strXMLFile)
+        strNEWXML = strPath+"/"+strNewName+".xml"
+        if(os.path.exists(strNEWXML)):
+            print "Specified kvm xml file already exist(%s)" % strNEWXML
+            return
+
+        tree.write(strNEWXML)
+
+            
+        """
+        rbd snap create rbd/sl71-harmdev@sl71-harmdev-snap
+        rbd snap protect rbd/sl71-harmdev@sl71-harmdev-snap
+        rbd clone rbd/sl71-harmdev@sl71-harmdev-snap rbd/sl71-harmdev2
+        rbd snap unprotect rbd/sl71-harmdev@sl71-harmdev-snap
+        """
+        strDate = dt.now().strftime("%Y%m%d%H%M%S")
+
+        strCmd = "rbd snap create %s/%s@%s-clone-%s" % (strPOOLName,
+                                                        strOrgName,
+                                                        strNewName,
+                                                        strDate)
+        p2 = sp.Popen(re.split(" ",strCmd))
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd snap create error(%s)" % strErr
+            return
+        print strOut
+
+        strCmd = "rbd snap protect %s@%s-clone-%s" % (strRBDName,
+                                                     strNewName,
+                                                     strDate)
+        p2 = sp.Popen(re.split(" ",strCmd))
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd snap protect error(%s)" % strErr
+            return
+        print strOut
+
+        strCmd = "rbd clone %s@%s-clone-%s rbd/%s" % (strRBDName,
+                                                         strNewName,
+                                                         strDate,
+                                                         strNewName)
+        p2 = sp.Popen(re.split(" ",strCmd))
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "rbd clone error(%s)" % strErr
+            return
+        print strOut
+
+
+    def ena(self,argv,argc):
+        self.disena(argv,argc,"enable")
+
+    def dis(self,argv,argc):
+        self.disena(argv,argc,"disable")
+
+    def disena(self,argv,argc,strOpr):
+        strVMname = argv[2]
+        strPCScmd = 'pcs resource %s vm-%s' % (strOpr,strVMname)
+        p2 = sp.Popen(re.split(" ",strPCScmd))
+        strOut,strErr = p2.communicate()
+        if(strErr):
+            print "pcs resource disable error(%s)" % strErr
+            return
+        print strOut
+        
+    def GuessFunc(self,strOpr):
+        lstRet = []
+        for k,v in self.dicFunc.items():
+            if(re.match(strOpr,k)):
+                lstRet.append({"str":k,"func":v})
+        if(len(lstRet) == 1):
+            return lstRet[0]["func"]
+        elif(len(lstRet) == 0):
+            return "No matching operation"
+        else:
+            lstKeys = []
+            for k in lstRet:
+                lstKeys.append(k["str"])
+            return "Operation is ambiguous: "+",".join(lstKeys)
+
+    def DispatchFunc(self):
+        argv = sys.argv
+        argc = len(argv)
+        if(argc == 1):
+            argv.append("list")
+
+        strFunc = self.GuessFunc(argv[1])
+        if(isinstance(strFunc,str)):
+            print "%s" % strFunc
+            sys.exit(0)
+        else:
+            strFunc(argv,argc)
+
+
+
+if __name__ == "__main__":
+   app = Flask(__name__)
+   app.secret_key = 'restapi'
+   app.debug=True
+   app.MAX_CONTENT_LENGTH = 10
+   app.insCV=ClusterVirt()
+   api = Api(app)
+
+   class CGuest(Resource):
+       def get(self):
+           return  current_app.insCV.ShowGuests(None,None)
+   api.add_resource(CGuest,         '/v1/guest', strict_slashes=False)
+
+   app.run(host="127.0.0.1",port=7000, debug=True)
