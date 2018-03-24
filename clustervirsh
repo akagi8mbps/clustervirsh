@@ -9,6 +9,8 @@ import os.path
 import Mconfig
 import time
 import threading
+from datetime import datetime as dt
+
 
 class ClusterVirt():
     def __init__(self):
@@ -46,7 +48,7 @@ class ClusterVirt():
         while True:
             tlist=threading.enumerate()
             if len(tlist) < 2: break
-            time.sleep(1)
+            time.sleep(0.3)
 
         # import pprint
         # pprint.pprint(dir(lstHV[0]))
@@ -56,6 +58,7 @@ class ClusterVirt():
 
     def ShowGuests(self,argv,argc):
         for hv in self.lstHV:
+
             print(hv.getHostname() + "--------------------------------")
 
             lstRet = []
@@ -454,8 +457,7 @@ SNAPID NAME        SIZE
         rbd clone rbd/sl71-harmdev@sl71-harmdev-snap rbd/sl71-harmdev2
         rbd snap unprotect rbd/sl71-harmdev@sl71-harmdev-snap
         """
-        from datetime import datetime
-        strDate = datetime.now().strftime("%Y%m%d%H%M%S")
+        strDate = dt.now().strftime("%Y%m%d%H%M%S")
 
         strCmd = "rbd snap create %s/%s@%s-clone-%s" % (strPOOLName,
                                                         strOrgName,
