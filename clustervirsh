@@ -126,9 +126,9 @@ class ClusterVirt():
                   + " hypervisor='qemu:///system' config='%s' migration_transport='ssh'" % strXMLfile \
                   + " meta allow-migrate='true' target-role='Started' is-managed='true'" \
                   + " op start interval=0 timeout=120s on-fail='restart'" \
-                  + " op monitor interval=15s timeout=30s on-fail='restart'" \
-                  + " op stop interval=0 timeout=90s on-fail='fence'" \
-                  + " op migrate_to interval=0 timeout=120s on-fail='fence'" \
+                  + " op monitor interval=15s timeout=60s on-fail='restart'" \
+                  + " op stop interval=0 timeout=90s on-fail='stop'" \
+                  + " op migrate_to interval=0 timeout=120s on-fail='restart'" \
                   + " op migrate_from interval=0 timeout=120s on-fail='restart'"
 
 
