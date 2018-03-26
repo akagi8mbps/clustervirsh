@@ -576,6 +576,17 @@ if __name__ == "__main__":
         #     pass
     api.add_resource(CControlGuest,         '/v1/<string:strVMname>', strict_slashes=False)
 
+    class CEnableGuest(self):
+        # "enable":self.ena
+        def get(self):
+            return current_app.insCV.ena(["","",strVMname],3)
+    api.add_resource(CEnableGuest,         '/v1/<string:strVMname>/enable', strict_slashes=False)
+    class CDisableGuest(self):
+        # "disable":self.dis,
+        def get(self):
+            return current_app.insCV.dis(["","",strVMname],3)
+    api.add_resource(CEnableGuest,         '/v1/<string:strVMname>/disable', strict_slashes=False)
+
     class CImage(Resource):
         # "delimage":self.DelImage,
         def delete(self,strVMname):
@@ -589,8 +600,6 @@ if __name__ == "__main__":
     api.add_resource(CImage,         '/v1/image/<string:strVMname>', strict_slashes=False)
 
 
-        # "disable":self.dis,
-        # "enable":self.ena
 
 
     app.run(host="127.0.0.1",port=7000, debug=True)
