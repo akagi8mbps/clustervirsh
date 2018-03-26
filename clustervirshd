@@ -340,7 +340,7 @@ SNAPID NAME        SIZE
             print "No vm found"
             return
         print "virsh -c qemu+ssh://%s/system console %s" % (hv.getHostname(),strVMname)
-
+        return "virsh -c qemu+ssh://%s/system console %s" % (hv.getHostname(),strVMname) 
     def rollback(self,argv,argc):
         if(not argc == 3):
             print "invalid argment: console vmname"
@@ -398,6 +398,9 @@ SNAPID NAME        SIZE
             print "(%s)" % strErr
             return
         print strOut
+
+
+
         #input rollback
         print "Input snap name:"
         strSnapname = raw_input()
@@ -545,16 +548,49 @@ SNAPID NAME        SIZE
 
 
 if __name__ == "__main__":
-   app = Flask(__name__)
-   app.secret_key = 'restapi'
-   app.debug=True
-   app.MAX_CONTENT_LENGTH = 10
-   app.insCV=ClusterVirt()
-   api = Api(app)
+    app = Flask(__name__)
+    app.secret_key = 'restapi'
+    app.debug=True
+    app.MAX_CONTENT_LENGTH = 10
+    app.insCV=ClusterVirt()
+    api = Api(app)
+    
+    # "list":self.ShowGuests,
+    class CGuest(Resource):
+        def get(self):
+            return  current_app.insCV.ShowGuests(None,None)
+    api.add_resource(CGuest,         '/v1/guest', strict_slashes=False)
 
-   class CGuest(Resource):
-       def get(self):
-           return  current_app.insCV.ShowGuests(None,None)
-   api.add_resource(CGuest,         '/v1/guest', strict_slashes=False)
+    class CControlGuest(Resource):
+        # "console":self.console,
+        def get(self,strVMname):
+            return current_app.insCV.console(["","",strVMname],3)
+        # "addvm":self.AddVM2PCS,
+        def post(self,strVMname):
+            return current_app.insCV.AddVM(["","",strVMname],3)
+        # "delvm":self.DelVM,
+        def delete(self,strVMname):
+            return current_app.insCV.DelVM(["","",strVMname],3)
+        # "migrate":self.migrate,
+        # def put(self,strVMname):
+        #     pass
+    api.add_resource(CControlGuest,         '/v1/<string:strVMname>', strict_slashes=False)
 
-   app.run(host="127.0.0.1",port=7000, debug=True)
+    class CImage(Resource):
+        # "delimage":self.DelImage,
+        def delete(self,strVMname):
+            return current_app.insCV.DelImage(["","",strVMname],3)
+        # "clone":self.clone,
+        def post(self,strVMname):
+            pass
+        # "rollback":self.rollback,
+        def patch(self,strVMname):
+            pass
+    api.add_resource(CImage,         '/v1/image/<string:strVMname>', strict_slashes=False)
+
+
+        # "disable":self.dis,
+        # "enable":self.ena
+
+
+    app.run(host="127.0.0.1",port=7000, debug=True)
