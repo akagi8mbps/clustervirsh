@@ -1,6 +1,4 @@
-# -*- coding: utf-8 -*-
-from flask import Flask,request,Response,g,current_app
-from flask_restful import Api,Resource,reqparse
+#!/bin/python
 import os
 import sys
 import libvirt
@@ -12,6 +10,8 @@ import Mconfig
 import time
 import threading
 from datetime import datetime as dt
+import requests
+import json
 
 class ClusterVirt():
     def __init__(self):
@@ -30,63 +30,19 @@ class ClusterVirt():
         }
         self.lstHypervisor = Mconfig.lstHypervisor
 
-        def ConnectHV(q):
-            insLibvirt = None
-	    try:
-                insLibvirt = libvirt.open(q)
-                libvirt.registerErrorHandler(f=self.libvirt_ignore, ctx=None)
-            except Exception as e :
-                #print "LIBVIRT OPEN ERROR(%s):%s" % (q,str(e))
-                pass
-
-            if(insLibvirt):
-                self.lstHV.append(libvirt.open(q))
-
-        for q in self.lstHypervisor:
-            t = threading.Thread(target=ConnectHV,args=([q]))
-            t.setDaemon(True)
-            t.start()
-        while True:
-            tlist=threading.enumerate()
-            if len(tlist) < 2: break
-            time.sleep(0.3)
-
-        # import pprint
-        # pprint.pprint(dir(lstHV[0]))
 
     def libvirt_ignore(ignore, err):
         pass
 
     def ShowGuests(self,argv,argc):
-        lstRetTotal = []
-        for hv in self.lstHV:
-
-            print(hv.getHostname() + "--------------------------------")
-
-            lstRet = []
-            for id in hv.listDomainsID():
-                dom = hv.lookupByID(id)
-                infos = dom.info()
-                dicState = { 0:"NOSTATE",
-                             1:"RUNNING",
-                             2:"BLOCKED",
-                             3:"PAUSED ",
-                             4:"SHUTDOW",
-                             5:"SHUTOFF",
-                             6:"CRASHED",
-                             7:"SUSPEND",
-                             8:"LAST   "}
-                lstRet.append([dom.name(),dicState[infos[0]],infos[1],infos[3],infos[2]])
-                lstRetTotal.append([hv.getHostname(),dom.name(),dicState[infos[0]],infos[1],infos[3],infos[2]])
-
-            lstTitle = ["Name","State","MAXmem","CPUs","MEM"]
-            row_format ="{:>20}{:>10}{:>10}{:>5}{:>10}"
-            print(row_format.format(*lstTitle))
-
-            for row in lstRet:
-                print(row_format.format(*row))
-            print("")
-        return lstRetTotal
+        objRet = requests.get("http://127.0.0.1:7000/v1/guest")
+        lstRet = json.loads(objRet.content)
+        lstTitle = ["Host","Name","State","MAXmem","CPUs","MEM"]
+        row_format ="{:>20}{:>20}{:>10}{:>10}{:>5}{:>10}"
+        print(row_format.format(*lstTitle))
+        for row in lstRet:
+            print(row_format.format(*row))
+        print("")
 
     def AddVM2PCS(self,argv,argc):
         strXMLfile = argv[2]
@@ -335,12 +291,10 @@ SNAPID NAME        SIZE
             print "invalid argment: console vmname"
             return
         strVMname = argv[2]
-        hv,dom = self.GetVMHost(strVMname)
-        if(hv == None):
-            print "No vm found"
-            return
-        print "virsh -c qemu+ssh://%s/system console %s" % (hv.getHostname(),strVMname)
-        return "virsh -c qemu+ssh://%s/system console %s" % (hv.getHostname(),strVMname) 
+        objRet = requests.get("http://127.0.0.1:7000/v1/%s" % strVMname)
+        lstRet = json.loads(objRet.content)
+        print objRet.content
+
     def rollback(self,argv,argc):
         if(not argc == 3):
             print "invalid argment: console vmname"
@@ -398,9 +352,6 @@ SNAPID NAME        SIZE
             print "(%s)" % strErr
             return
         print strOut
-
-
-
         #input rollback
         print "Input snap name:"
         strSnapname = raw_input()
@@ -545,61 +496,10 @@ SNAPID NAME        SIZE
         else:
             strFunc(argv,argc)
 
-
-
 if __name__ == "__main__":
-    app = Flask(__name__)
-    app.secret_key = 'restapi'
-    app.debug=True
-    app.MAX_CONTENT_LENGTH = 10
-    app.insCV=ClusterVirt()
-    api = Api(app)
-    
-    # "list":self.ShowGuests,
-    class CGuest(Resource):
-        def get(self):
-            return  current_app.insCV.ShowGuests(None,None)
-    api.add_resource(CGuest,         '/v1/guest', strict_slashes=False)
+    if not os.getuid() == 0:
+      print "clustervirsh needs root priv."
+      sys.exit(-1)
 
-    class CControlGuest(Resource):
-        # "console":self.console,
-        def get(self,strVMname):
-            return current_app.insCV.console(["","",strVMname],3)
-        # "addvm":self.AddVM2PCS,
-        def post(self,strVMname):
-            return current_app.insCV.AddVM(["","",strVMname],3)
-        # "delvm":self.DelVM,
-        def delete(self,strVMname):
-            return current_app.insCV.DelVM(["","",strVMname],3)
-        # "migrate":self.migrate,
-        # def put(self,strVMname):
-        #     pass
-    api.add_resource(CControlGuest,         '/v1/<string:strVMname>', strict_slashes=False)
-
-    class CEnableGuest(Resource):
-        # "enable":self.ena
-        def get(self,strVMname):
-            return current_app.insCV.ena(["","",strVMname],3)
-    api.add_resource(CEnableGuest,         '/v1/<string:strVMname>/enable', strict_slashes=False)
-    class CDisableGuest(Resource):
-        # "disable":self.dis,
-        def get(self,strVMname):
-            return current_app.insCV.dis(["","",strVMname],3)
-    api.add_resource(CDisableGuest,         '/v1/<string:strVMname>/disable', strict_slashes=False)
-
-    class CImage(Resource):
-        # "delimage":self.DelImage,
-        def delete(self,strVMname):
-            return current_app.insCV.DelImage(["","",strVMname],3)
-        # "clone":self.clone,
-        def post(self,strVMname):
-            pass
-        # "rollback":self.rollback,
-        def patch(self,strVMname):
-            pass
-    api.add_resource(CImage,         '/v1/image/<string:strVMname>', strict_slashes=False)
-
-
-
-
-    app.run(host="127.0.0.1",port=7000, debug=True)
+    insCV = ClusterVirt()
+    insCV.DispatchFunc()
