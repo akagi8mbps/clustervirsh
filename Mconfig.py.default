@@ -1,0 +1,5 @@
+lstHypervisor = [
+    "qemu+ssh://node1/system",
+    "qemu+ssh://node2/system",
+    "qemu+ssh://node3/system"
+]
